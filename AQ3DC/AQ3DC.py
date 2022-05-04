@@ -1,13 +1,119 @@
 import os
 import unittest
 import logging
+# import patsy
 import vtk, qt, ctk, slicer
+import glob
+import numpy as np
+import collections
 from slicer.ScriptedLoadableModule import *
 from slicer.util import VTKObservationMixin
+
 
 #
 # AQ3DC
 #
+try:
+  import pandas as pd
+  import PyQt5
+
+except: 
+  slicer.util.pip_install('pandas')
+  slicer.util.pip_install('PyQt5')
+  import pandas as pd
+  from PyQt5.QtCore import QObject,QModelIndex,QVariant
+
+def ReadFolder(landmarks_dir_T1,landmarks_dir_T2):
+  dic_patient = {} 
+  dic_time = {}
+  dic_tooth = {}
+
+  landmarks_normpath_T1 = os.path.normpath("/".join([landmarks_dir_T1,'**','']))
+  landmarks_normpath_T2 = os.path.normpath("/".join([landmarks_dir_T2,'**','']))
+  lst_landmarks_dir = [landmarks_normpath_T1,landmarks_normpath_T2]
+
+  for land_dir in lst_landmarks_dir:
+      for jsonfile in sorted(glob.iglob(land_dir, recursive=True)):
+          if os.path.isfile(jsonfile) and True in [ext in jsonfile for ext in [".json"]]:
+            num_patient= os.path.basename(jsonfile).split("_")[0]
+            time = os.path.basename(jsonfile).split("_")[1]
+            if "_mand_" in jsonfile:
+              if num_patient in dic_patient.keys():
+                if time in dic_time.keys():
+                  dic_time[time]['path_landmark_L'] = jsonfile
+                  dic_patient[num_patient] = dic_time
+                else :
+                  dic_time[time] = {'path_landmark_L' : jsonfile}
+                  dic_patient[num_patient] = dic_time
+              else:
+                dic_time[time] = {'path_landmark_L' : jsonfile}
+                dic_patient[num_patient] = dic_time
+            else :
+              if num_patient in dic_patient.keys():
+                if time in dic_time.keys():
+                  dic_time[time]['path_landmark_U'] = jsonfile
+                  dic_patient[num_patient] = dic_time
+                else :
+                  dic_time[time] = {'path_landmark_U' : jsonfile}
+                  dic_patient[num_patient] = dic_time
+              else:
+                dic_time[time] = {'path_landmark_U' : jsonfile}
+                dic_patient[num_patient] = dic_time
+  
+  # print(dic_patient)
+  for obj in dic_patient.items():
+    obj=obj[1]    
+    for patient_t in obj.items():
+      time = patient_t[0]
+      dic_path_patient = patient_t[1]
+      # print(dic_path_patient)
+      # print(dic_path_patient.items())
+      for path_patient in dic_path_patient.items():
+        # print(path_patient)
+        json_file = pd.read_json(path_patient[1])
+        markups = json_file.loc[0,'markups']
+        controlPoints = markups['controlPoints']
+        for i in range(len(controlPoints)):
+          label = controlPoints[i]["label"].split("-")[1]
+          tooth = label[:-1]
+          type_land = label[-1:]
+          position = controlPoints[i]["position"]
+          if tooth not in dic_tooth.keys():
+            dic_tooth[tooth] = {}
+          if type_land not in dic_tooth[tooth]:
+            dic_tooth[tooth][type_land] = {}
+          
+          dic_tooth[tooth][type_land][time] = position
+  # print(dic_tooth)
+  return dic_tooth
+
+DistanceResult = collections.namedtuple("DistanceResult", ("delta", "norm"))
+def computeDistance(point1, point2) -> DistanceResult:
+    delta = np.abs(np.subtract(point2,point1))
+    return DistanceResult(
+        delta,
+        np.linalg.norm(delta),
+    )
+
+def compute_distance_T1T2(dic_tooth,type):
+  dic_distance = {}
+  for landmark in dic_tooth.items():
+    land = landmark[1]
+    name = landmark[0]
+    point_T1 = np.array(land[type]['T1'])
+    point_T2 = np.array(land[type]['T2'])
+    distance = computeDistance(point_T2,point_T1)
+    if name not in dic_distance.keys(): 
+      dic_distance[name] = {}
+    dic_distance[name] = distance
+  print(dic_distance)
+  return dic_distance
+
+
+
+# def export_csv(dic_distance):
+#   p
+
 
 class AQ3DC(ScriptedLoadableModule):
   """Uses ScriptedLoadableModule base class, available at:
@@ -82,6 +188,7 @@ def registerSampleData():
     # This node name will be used when the data set is loaded
     nodeNames='AQ3DC2'
   )
+  
 
 #
 # AQ3DCWidget
@@ -128,20 +235,98 @@ class AQ3DCWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # These connections ensure that we update parameter node when scene is closed
     self.addObserver(slicer.mrmlScene, slicer.mrmlScene.StartCloseEvent, self.onSceneStartClose)
     self.addObserver(slicer.mrmlScene, slicer.mrmlScene.EndCloseEvent, self.onSceneEndClose)
+    # self.deps = DependantMarkups.DependantMarkupsLogic 
+
 
     # These connections ensure that whenever user changes some settings on the GUI, that is saved in the MRML scene
     # (in the selected parameter node).
-    self.ui.inputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
-    self.ui.outputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
-    self.ui.imageThresholdSliderWidget.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
-    self.ui.invertOutputCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
-    self.ui.invertedOutputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
+    # self.ui.inputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
+    # self.ui.outputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
+    # self.ui.imageThresholdSliderWidget.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
+    # self.ui.invertOutputCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
+    # self.ui.invertedOutputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
+
+
+    self.lm_tab = LMTab()
+    self.ui.verticalLayout_2.addWidget(self.lm_tab.widget)
+
+    self.table_view = TableView()
+    self.ui.verticalLayout_3.addWidget(self.table_view)
 
     # Buttons
     self.ui.applyButton.connect('clicked(bool)', self.onApplyButton)
+    self.ui.pushButton_DataFolder_T1.connect('clicked(bool)',self.onSearchFolderButton_T1)
+    self.ui.pushButton_DataFolder_T2.connect('clicked(bool)',self.onSearchFolderButton_T2)
+    self.ui.pushButton_Display.connect('clicked(bool)',self.onDisplayButton)
+    self.ui.pushButton_OclusalDataT1T2.connect('clicked(bool)',self.onComputeOclusalDistance)
+    self.ui.pushButton_MesialDataT1T2.connect('clicked(bool)',self.onComputeMesialDistance)
+    self.ui.pushButton_DistalDataT1T2.connect('clicked(bool)',self.onComputeDistalDistance)
+    # self.ui.pushButton_Run.connect('clicked(bool)',self.onRun)
 
     # Make sure parameter node is initialized (needed for module reload)
     self.initializeParameterNode()
+
+    self.surface_folder = '/Users/luciacev-admin/Desktop/T1'
+    self.surface_folder_2 = '/Users/luciacev-admin/Desktop/T2'
+    self.dic_tooth = ReadFolder(self.surface_folder,self.surface_folder_2)
+
+    
+
+  def onSearchFolderButton_T1(self):
+    surface_folder = qt.QFileDialog.getExistingDirectory(self.parent, "Select a scan folder")
+    if surface_folder != '':
+      self.surface_folder = surface_folder
+      self.ui.lineEditLandPathT1.setText(self.surface_folder)
+  
+  def onSearchFolderButton_T2(self):
+    surface_folder = qt.QFileDialog.getExistingDirectory(self.parent, "Select a scan folder")
+    if surface_folder != '':
+      self.surface_folder_2 = surface_folder
+      self.ui.lineEditLandPathT2.setText(self.surface_folder_2)
+
+  def onDisplayButton(self):
+    # self.dic_tooth = ReadFolder(self.surface_folder,self.surface_folder_2)
+    self.lm_tab.Clear()
+    self.lm_tab.FillTab(self.dic_tooth)
+
+  def onComputeOclusalDistance(self):   
+    lst_select_tooth = self.lm_tab.Get_selected_tooth()
+    print(lst_select_tooth)
+    self.update_dic_tooth = self.dic_tooth.copy()
+    for tooth in self.dic_tooth:
+      if tooth not in lst_select_tooth:
+        self.update_dic_tooth.pop(tooth)
+
+    self.dic_distance = compute_distance_T1T2(self.update_dic_tooth,'o')
+
+  def onComputeMesialDistance(self): 
+    lst_select_tooth = self.lm_tab.Get_selected_tooth()
+    print(lst_select_tooth)
+    self.update_dic_tooth = self.dic_tooth.copy()
+    for tooth in self.dic_tooth:
+      if tooth not in lst_select_tooth:
+        self.update_dic_tooth.pop(tooth)
+    
+    self.dic_distance = compute_distance_T1T2(self.update_dic_tooth,'m')
+  
+  def onComputeDistalDistance(self):
+    lst_select_tooth = self.lm_tab.Get_selected_tooth()
+    print(lst_select_tooth)
+    self.update_dic_tooth = self.dic_tooth.copy()
+    for tooth in self.dic_tooth:
+      if tooth not in lst_select_tooth:
+        self.update_dic_tooth.pop(tooth)
+    
+    self.dic_distance = compute_distance_T1T2(self.update_dic_tooth,'d')
+
+  def onExportButton(self):
+    self.logic.exportationFunction(
+      self.directoryExportDistance,
+      self.filenameExportDistance,
+      self.distance_table,
+      "distance",
+    )
+
 
   def cleanup(self):
     """
@@ -227,11 +412,11 @@ class AQ3DCWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self._updatingGUIFromParameterNode = True
 
     # Update node selectors and sliders
-    self.ui.inputSelector.setCurrentNode(self._parameterNode.GetNodeReference("InputVolume"))
-    self.ui.outputSelector.setCurrentNode(self._parameterNode.GetNodeReference("OutputVolume"))
-    self.ui.invertedOutputSelector.setCurrentNode(self._parameterNode.GetNodeReference("OutputVolumeInverse"))
-    self.ui.imageThresholdSliderWidget.value = float(self._parameterNode.GetParameter("Threshold"))
-    self.ui.invertOutputCheckBox.checked = (self._parameterNode.GetParameter("Invert") == "true")
+    # self.ui.inputSelector.setCurrentNode(self._parameterNode.GetNodeReference("InputVolume"))
+    # self.ui.outputSelector.setCurrentNode(self._parameterNode.GetNodeReference("OutputVolume"))
+    # self.ui.invertedOutputSelector.setCurrentNode(self._parameterNode.GetNodeReference("OutputVolumeInverse"))
+    # self.ui.imageThresholdSliderWidget.value = float(self._parameterNode.GetParameter("Threshold"))
+    # self.ui.invertOutputCheckBox.checked = (self._parameterNode.GetParameter("Invert") == "true")
 
     # Update buttons states and tooltips
     if self._parameterNode.GetNodeReference("InputVolume") and self._parameterNode.GetNodeReference("OutputVolume"):
@@ -263,6 +448,7 @@ class AQ3DCWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     self._parameterNode.EndModify(wasModified)
 
+
   def onApplyButton(self):
     """
     Run processing when user clicks "Apply" button.
@@ -283,6 +469,234 @@ class AQ3DCWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       slicer.util.errorDisplay("Failed to compute results: "+str(e))
       import traceback
       traceback.print_exc()
+
+class LMTab:
+  def __init__(self) -> None:
+
+    self.widget = qt.QWidget()
+    layout = qt.QVBoxLayout(self.widget)
+
+    self.LM_tab_widget = qt.QTabWidget()
+    self.LM_tab_widget.minimumSize = qt.QSize(100,200)
+    self.LM_tab_widget.maximumSize = qt.QSize(800,400)
+    self.LM_tab_widget.setMovable(True)
+
+
+    # print(self.lm_status_dic)
+    # print(lcbd)
+    buttons_wid = qt.QWidget()
+    buttons_layout = qt.QHBoxLayout(buttons_wid)
+    self.select_all_btn = qt.QPushButton("Select All")
+    self.select_all_btn.setEnabled(False)
+    self.select_all_btn.connect('clicked(bool)', self.SelectAll)
+    self.clear_all_btn = qt.QPushButton("Clear All")
+    self.clear_all_btn.setEnabled(False)
+    self.clear_all_btn.connect('clicked(bool)', self.ClearAll)
+
+    buttons_layout.addWidget(self.select_all_btn)
+    buttons_layout.addWidget(self.clear_all_btn)
+
+    layout.addWidget(self.LM_tab_widget)
+    layout.addWidget(buttons_wid)
+    self.lm_status_dic = {}
+
+  def Clear(self):
+    self.LM_tab_widget.clear()
+
+  def FillTab(self,lm_dic):
+    self.select_all_btn.setEnabled(True)
+    self.clear_all_btn.setEnabled(True)
+
+    self.lm_group_dic = lm_dic
+    # self.lm_group_dic["All"] = []
+   
+    lm_lst=[]
+    lm_type_lst=[]
+    lst_wid=[]
+    lst_wtype=[]
+    self.lm_status_dic = {}
+    self.check_box_dic = {}
+
+    for landmark_name,type_land_dic in lm_dic.items():
+        lm_lst.append(landmark_name)
+        for type,time_dic in type_land_dic.items():
+          if type not in lm_type_lst:
+            lm_type_lst.append(type)
+
+    for lm in lm_lst:
+      new_cb = qt.QCheckBox(lm)
+      self.check_box_dic[new_cb] = lm
+      lst_wid.append(new_cb)
+      if lm not in self.lm_status_dic.keys():
+          self.lm_status_dic[lm] = False
+
+    for type in lm_type_lst:
+      new_cb = qt.QCheckBox(type)
+      lst_wtype.append(new_cb)
+
+    new_tooth_tab = self.GenNewTab(lst_wid)
+    new_lm_type_tab = self.GenNewTab(lst_wtype)
+
+    self.LM_tab_widget.insertTab(0,new_tooth_tab,'tooth')
+    self.LM_tab_widget.insertTab(-1,new_lm_type_tab,'landmarks type')
+     
+    self.LM_tab_widget.currentIndex = 0
+
+    # print(self.check_box_dic)
+    lcbd = {}
+    for cb,lm in self.check_box_dic.items():
+      if lm not in lcbd.keys():
+        lcbd[lm] = [cb]
+      else:
+        lcbd[lm].append(cb)
+
+    self.lm_cb_dic = lcbd
+
+    for cb in self.check_box_dic.keys():
+      cb.connect("toggled(bool)", self.CheckBox)
+
+  def CheckBox(self, caller=None, event=None):
+    print(self.check_box_dic)
+    for cb,lm in self.check_box_dic.items():
+      if cb.checkState():
+        state = True
+      else:
+        state = False
+      
+      if self.lm_status_dic[lm] != state:
+        self.UpdateLmSelect(lm,state)
+        print(self.lm_status_dic)
+    
+
+  def GenNewTab(self,widget_lst):
+      new_widget = qt.QWidget()
+      vb = qt.QVBoxLayout(new_widget)
+      hb = qt.QHBoxLayout(new_widget)
+
+      scr_box = qt.QScrollArea()
+      vb.addWidget(scr_box)
+      vb.addLayout(hb)
+
+      sa = qt.QPushButton('Select all tab')
+      sa.connect('clicked(bool)', self.SelectAllTab)
+      hb.addWidget(sa)
+
+      ca = qt.QPushButton('Clear all tab')
+      ca.connect('clicked(bool)', self.ClearAllTab)
+      hb.addWidget(ca)
+
+
+      wid = qt.QWidget()
+      vb2 = qt.QVBoxLayout()
+      for widget in widget_lst:
+        vb2.addWidget(widget)
+      wid.setLayout(vb2)
+
+      scr_box.setVerticalScrollBarPolicy(qt.Qt.ScrollBarAlwaysOn)
+      scr_box.setHorizontalScrollBarPolicy(qt.Qt.ScrollBarAlwaysOff)
+      scr_box.setWidgetResizable(True)
+      scr_box.setWidget(wid)
+
+      return new_widget
+
+  def SelectAllTab(self):
+    for cb,lm in self.check_box_dic.items():
+        state = True
+        self.UpdateLmSelect(lm,state)
+
+  def ClearAllTab(self):
+    for cb,lm in self.check_box_dic.items():
+        state = False
+        self.UpdateLmSelect(lm,state)
+
+
+  def UpdateLmSelect(self,lm_id,state):
+    for cb in self.lm_cb_dic[lm_id]:
+      cb.setChecked(state)
+    self.lm_status_dic[lm_id] = state
+    # print(self.lm_status_dic)
+
+  def UpdateAll(self,state):
+    for lm_id,cb_lst in self.lm_cb_dic.items():
+      for cb in cb_lst:
+        cb.setChecked(state)
+      self.lm_status_dic[lm_id] = state
+
+  def SelectAll(self):
+    self.UpdateAll(True)
+  
+  def ClearAll(self):
+    self.UpdateAll(False)
+
+  def Get_selected_tooth(self):
+    lst_selected_tooth = []
+    for tooth_state in self.lm_status_dic.items():
+      if tooth_state[1] == True :
+        lst_selected_tooth.append(tooth_state[0])
+    # print(lst_selected_tooth)
+    return lst_selected_tooth
+
+class TableView:
+  def __init__(self):
+    self.tab_wi = qt.QTableWidget()
+
+  def create_tab(self):
+    self.tab_wi.setRowCount(10)
+    self.tab_wi.setColumnCount(10)
+    
+
+
+ 
+    
+def GetAvailableLm(mfold,lm_group):
+  brain_dic = GetBrain(mfold)
+  # print(brain_dic)
+  available_lm = {"Other":[]}
+  for lm in brain_dic.keys():
+    if lm in lm_group.keys():
+      group = lm_group[lm]
+    else:
+      group = "Other"
+    if group not in available_lm.keys():
+      available_lm[group] = [lm]
+    else:
+      available_lm[group].append(lm)
+
+  return available_lm,brain_dic
+
+def GetLandmarkGroup(group_landmark):
+  lm_group = {}
+  for group,labels in group_landmark.items():
+    for label in labels:
+        lm_group[label] = group
+  return lm_group
+
+def GetBrain(dir_path):
+  brainDic = {}
+  normpath = os.path.normpath("/".join([dir_path, '**', '']))
+  for img_fn in sorted(glob.iglob(normpath, recursive=True)):
+      #  print(img_fn)
+      if os.path.isfile(img_fn) and ".pth" in img_fn:
+          lab = os.path.basename(os.path.dirname(os.path.dirname(img_fn)))
+          num = os.path.basename(os.path.dirname(img_fn))
+          if lab in brainDic.keys():
+              brainDic[lab][num] = img_fn
+          else:
+              network = {num : img_fn}
+              brainDic[lab] = network
+
+  # print(brainDic)
+  out_dic = {}
+  for l_key in brainDic.keys():
+      networks = []
+      for n_key in range(len(brainDic[l_key].keys())):
+          networks.append(brainDic[l_key][str(n_key)])
+
+      out_dic[l_key] = networks
+
+  return out_dic
+
+
 
 
 #
