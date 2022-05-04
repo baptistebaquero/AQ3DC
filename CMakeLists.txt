@@ -5,7 +5,7 @@ project(AQ3DC)
 #-----------------------------------------------------------------------------
 # Extension meta-information
 set(EXTENSION_HOMEPAGE "https://www.slicer.org/wiki/Documentation/Nightly/Extensions/AQ3DC")
-set(EXTENSION_CATEGORY "Examples")
+set(EXTENSION_CATEGORY "Measures")
 set(EXTENSION_CONTRIBUTORS "John Doe (AnyWare Corp.), Baptiste Baquero (UoM)")
 set(EXTENSION_DESCRIPTION "This is an example of a simple extension")
 set(EXTENSION_ICONURL "http://www.example.com/Slicer/Extensions/AQ3DC.png")

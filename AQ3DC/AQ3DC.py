@@ -37,7 +37,7 @@ def ReadFolder(landmarks_dir_T1,landmarks_dir_T2):
           if os.path.isfile(jsonfile) and True in [ext in jsonfile for ext in [".json"]]:
             num_patient= os.path.basename(jsonfile).split("_")[0]
             time = os.path.basename(jsonfile).split("_")[1]
-            if "_mand_" in jsonfile:
+            if "_mand_" or "_L" in jsonfile:
               if num_patient in dic_patient.keys():
                 if time in dic_time.keys():
                   dic_time[time]['path_landmark_L'] = jsonfile
@@ -74,9 +74,9 @@ def ReadFolder(landmarks_dir_T1,landmarks_dir_T2):
         markups = json_file.loc[0,'markups']
         controlPoints = markups['controlPoints']
         for i in range(len(controlPoints)):
-          label = controlPoints[i]["label"].split("-")[1]
-          tooth = label[:-1]
-          type_land = label[-1:]
+          label = controlPoints[i]["label"]#.split("-")[1]
+          tooth = label[:3]
+          type_land = label[3:]
           position = controlPoints[i]["position"]
           if tooth not in dic_tooth.keys():
             dic_tooth[tooth] = {}
@@ -248,10 +248,12 @@ class AQ3DCWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
 
     self.lm_tab = LMTab()
-    self.ui.verticalLayout_2.addWidget(self.lm_tab.widget)
+    self.ui.verticalLayout_1.addWidget(self.lm_tab.widget)
 
     self.table_view = TableView()
-    self.ui.verticalLayout_3.addWidget(self.table_view)
+    self.ui.verticalLayout_2.addWidget(self.lm_tab.widget)
+
+    
 
     # Buttons
     self.ui.applyButton.connect('clicked(bool)', self.onApplyButton)
@@ -266,9 +268,10 @@ class AQ3DCWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # Make sure parameter node is initialized (needed for module reload)
     self.initializeParameterNode()
 
-    self.surface_folder = '/Users/luciacev-admin/Desktop/T1'
-    self.surface_folder_2 = '/Users/luciacev-admin/Desktop/T2'
+    self.surface_folder = '/home/luciacev-admin/Desktop/AQ3DC_data/renamed_data/T1'
+    self.surface_folder_2 = '/home/luciacev-admin/Desktop/AQ3DC_data/renamed_data/T2'
     self.dic_tooth = ReadFolder(self.surface_folder,self.surface_folder_2)
+    print(self.dic_tooth)
 
     
 
@@ -288,6 +291,7 @@ class AQ3DCWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # self.dic_tooth = ReadFolder(self.surface_folder,self.surface_folder_2)
     self.lm_tab.Clear()
     self.lm_tab.FillTab(self.dic_tooth)
+    # self.table_view.create_tab()
 
   def onComputeOclusalDistance(self):   
     lst_select_tooth = self.lm_tab.Get_selected_tooth()
@@ -508,6 +512,7 @@ class LMTab:
     self.clear_all_btn.setEnabled(True)
 
     self.lm_group_dic = lm_dic
+    print(self.lm_group_dic)
     # self.lm_group_dic["All"] = []
    
     lm_lst=[]
@@ -639,6 +644,7 @@ class LMTab:
 class TableView:
   def __init__(self):
     self.tab_wi = qt.QTableWidget()
+    
 
   def create_tab(self):
     self.tab_wi.setRowCount(10)
